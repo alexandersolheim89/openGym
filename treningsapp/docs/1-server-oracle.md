@@ -49,6 +49,11 @@ Menyen ☰ → **Compute → Instances → Create instance**.
 
 Trykk **Create**. Får du *Out of capacity*, prøv igjen litt senere.
 
+Er det fullt over lang tid, bruk den lille gratismaskinen i stedet: *Change shape* →
+**Specialty and previous generation** → **VM.Standard.E2.1.Micro** (1/8 CPU, 1 GB minne). Velg
+**Canonical Ubuntu 24.04** på nytt etterpå. Den holder fint for to personer, men trenger swap
+(steg 5).
+
 Når den står som **Running**: noter **Public IP address**.
 
 ## 3. Åpne portene for nettsiden (i Oracle)
@@ -81,6 +86,20 @@ sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 80 -j ACCEPT
 sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 443 -j ACCEPT
 sudo netfilter-persistent save
 ```
+
+**Bare på den lille maskinen (VM.Standard.E2.1.Micro, 1 GB minne):** legg inn 2 GB
+reserveminne (swap), så serveren ikke går tom for minne:
+
+```bash
+sudo fallocate -l 2G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+free -h
+```
+
+`free -h` skal nå vise `Swap: 2.0Gi`.
 
 Installer Docker:
 
