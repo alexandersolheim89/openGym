@@ -1,0 +1,167 @@
+{
+ "opengym_plan": 1,
+ "exported": "2026-11-09",
+ "name": "Helkropp garasjen",
+ "unit": "kg",
+ "week": {},
+ "routines": [
+  {
+   "id": "r_hk_a",
+   "name": "Helkropp A",
+   "emoji": "💪",
+   "ex": [
+    {
+     "id": "1760",
+     "sets": 4,
+     "reps": 12,
+     "repsMin": 8,
+     "prog": "double",
+     "sg": "a1",
+     "sgName": "Knebøy + roing",
+     "sgRest": 90
+    },
+    {
+     "id": "0292",
+     "sets": 4,
+     "reps": 12,
+     "repsMin": 8,
+     "prog": "double",
+     "side": true,
+     "sg": "a1",
+     "sgName": "Knebøy + roing",
+     "sgRest": 90
+    },
+    {
+     "id": "0289",
+     "sets": 3,
+     "reps": 12,
+     "repsMin": 8,
+     "prog": "double",
+     "dbLoad": "each",
+     "sg": "a2",
+     "sgName": "Press + hofte",
+     "sgRest": 90
+    },
+    {
+     "id": "1459",
+     "sets": 3,
+     "reps": 12,
+     "repsMin": 8,
+     "prog": "double",
+     "dbLoad": "each",
+     "sg": "a2",
+     "sgName": "Press + hofte",
+     "sgRest": 90
+    },
+    {
+     "id": "0334",
+     "sets": 3,
+     "reps": 15,
+     "repsMin": 12,
+     "prog": "double",
+     "dbLoad": "each",
+     "sg": "a3",
+     "sgName": "Skuldre + armer",
+     "sgRest": 60
+    },
+    {
+     "id": "0294",
+     "sets": 2,
+     "reps": 15,
+     "repsMin": 10,
+     "prog": "double",
+     "dbLoad": "each",
+     "sg": "a3",
+     "sgName": "Skuldre + armer",
+     "sgRest": 60
+    },
+    {
+     "id": "2197",
+     "sets": 1,
+     "mode": "cardio",
+     "min": 15,
+     "note": "Rolig jogg i pulssone 2"
+    }
+   ]
+  },
+  {
+   "id": "r_hk_b",
+   "name": "Helkropp B",
+   "emoji": "🏃",
+   "ex": [
+    {
+     "id": "2290",
+     "sets": 3,
+     "reps": 12,
+     "repsMin": 8,
+     "prog": "double",
+     "side": true,
+     "dbLoad": "each",
+     "sg": "b1",
+     "sgName": "Utfall + roing",
+     "sgRest": 90
+    },
+    {
+     "id": "5661",
+     "sets": 3,
+     "reps": 12,
+     "repsMin": 10,
+     "prog": "double",
+     "dbLoad": "each",
+     "sg": "b1",
+     "sgName": "Utfall + roing",
+     "sgRest": 90
+    },
+    {
+     "id": "0405",
+     "sets": 3,
+     "reps": 12,
+     "repsMin": 8,
+     "prog": "double",
+     "dbLoad": "each",
+     "sg": "b2",
+     "sgName": "Press + swing",
+     "sgRest": 90
+    },
+    {
+     "id": "0549",
+     "sets": 3,
+     "reps": 15,
+     "sg": "b2",
+     "sgName": "Press + swing",
+     "sgRest": 90,
+     "note": "16 kg, eksplosivt fra hofta"
+    },
+    {
+     "id": "0314",
+     "sets": 3,
+     "reps": 12,
+     "repsMin": 10,
+     "prog": "double",
+     "dbLoad": "each",
+     "sg": "b3",
+     "sgName": "Skrå + triceps",
+     "sgRest": 60
+    },
+    {
+     "id": "2188",
+     "sets": 2,
+     "reps": 15,
+     "repsMin": 10,
+     "prog": "double",
+     "sg": "b3",
+     "sgName": "Skrå + triceps",
+     "sgRest": 60
+    },
+    {
+     "id": "2197",
+     "sets": 1,
+     "mode": "cardio",
+     "min": 15,
+     "note": "Intervaller: 6 x (1 min hardt / 1 min rolig)"
+    }
+   ]
+  }
+ ],
+ "customEx": []
+}
