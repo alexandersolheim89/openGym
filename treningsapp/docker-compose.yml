@@ -51,13 +51,19 @@ services:
       - caddy_data:/data
       - caddy_config:/config
 
-  # Kommer i neste steg:
-  # garmin-sync:
-  #   build: ./garmin-sync
-  #   restart: unless-stopped
-  #   env_file: .env
-  #   volumes:
-  #     - ./garmin-tokens:/tokens
+  # Henter løpeturer og andre aktiviteter fra Garmin inn i openGym (docs/2-garmin-sync.md).
+  garmin-sync:
+    build: ./garmin-sync
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      - OPENGYM_URL=http://api:3000
+      - GARMIN_SYNC_OPENGYM_TOKEN=${GARMIN_SYNC_OPENGYM_TOKEN:-}
+      - SYNC_INTERVAL_MIN=${SYNC_INTERVAL_MIN:-30}
+      - TZ=${TZ:-Europe/Oslo}
+    volumes:
+      - ./garmin-tokens:/tokens   # Garmin-innlogging (ikke passordet). Ikke i git, ikke i backup.
 
 volumes:
   caddy_data:
