@@ -91,6 +91,22 @@ docker compose up -d garmin-sync && docker compose logs -f garmin-sync
 Etter noen sekunder skal du se `Lagt inn …`-linjer for øktene. **Ctrl+C** for å slutte å følge med.
 Tjenesten går videre i bakgrunnen og starter av seg selv når serveren starter.
 
+## Øktene dine på klokka
+
+Rutinene i openGym (Hjemme A, Hjemme B, Express, Jobb …) lastes opp som styrkeøkter i Garmin
+Connect og sendes til klokka. Endrer du en rutine i appen, oppdateres økta innen 30 minutter;
+sletter du den, forsvinner den fra Garmin.
+
+**På klokka:** Styrke → hold inne / Meny → **Økter** → velg økta. Klokka viser øvelse, reps og
+hvile; du bekrefter reps og vekt per sett. Startvekten er det du løftet sist i openGym.
+
+**Tilbake i openGym:** når klokka har synket, kommer økta inn med de ekte øvelsene og settene,
+krysser av i rotasjonen og gir vektforslag til neste gang, akkurat som en økt logget i appen.
+Logger du samme økt i appen også, hoppes klokkas versjon over.
+
+Øvelsene er koblet til Garmins katalog i `garmin-sync/garmin_workouts.py`. En øvelse uten
+kobling er ikke med på klokka (loggen sier fra); legg den til der.
+
 ## Styrke fra openGym til Garmin
 
 Styrkeøkter du logger i openGym sendes til Garmin Connect, så Garmin har de ekte settene:

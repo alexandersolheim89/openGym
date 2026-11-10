@@ -19,6 +19,8 @@ import json
 import os
 import subprocess
 import tempfile
+
+import garmin_workouts
 import sys
 import time
 import urllib.error
@@ -162,7 +164,7 @@ def strength_summary(sets_data):
     return ("Garmin gjettet: " + " · ".join(parts)) if parts else ""
 
 
-def to_workout(a, strength_sets=None):
+def to_workout(a, strength_sets=None, routines=None):
     """En Garmin-aktivitet -> en openGym-økt, eller None for typer vi ikke tar med."""
     type_key = (a.get("activityType") or {}).get("typeKey") or ""
     if type_key not in TYPES:
@@ -200,6 +202,21 @@ def to_workout(a, strength_sets=None):
     if _num(a.get("calories")):
         bits.append(f"{round(_num(a.get('calories')))} kcal")
 
+    if ex_id == "gmstrength":
+        name = (a.get("activityName") or "").strip()
+        routine = next((r for r in routines or [] if (r.get("name") or "").strip().lower() == name.lower()), None)
+        entries = garmin_workouts.activity_to_entries(strength_sets, routine)
+        if entries:
+            extra = [b for b in bits if b.startswith("snittpuls") or b.endswith("kcal")]
+            return {
+                "id": f"gm{act_id}", "d": day, "start": start, "end": start + int(round(dur * 1000)),
+                "routineId": routine.get("id") if routine else None,
+                "name": (routine or {}).get("name") or name or "Styrke",
+                "entries": entries, "prs": [],
+                "vol": round(sum((x["w"] or 0) * (x["r"] or 0) for e in entries for x in e["sets"]), 1),
+                "note": " · ".join(["Logget på Garmin-klokka"] + extra),
+                "_strength": True,
+            }
     return {
         "id": f"gm{act_id}",
         "d": day,
@@ -211,6 +228,7 @@ def to_workout(a, strength_sets=None):
         "prs": [],
         "vol": 0,
         "note": " · ".join(bits),
+        **({"_strength": True} if ex_id == "gmstrength" else {}),
     }
 
 
@@ -400,7 +418,17 @@ def merge_into(state, workouts):
         return any(w["start"] - slack <= e and s <= w["end"] + slack for s, e in own)
     fresh = [w for w in workouts if w["id"] not in have and w["id"] not in gone
              and not any(e["id"] in blocked for e in w["entries"])
-             and not (w["entries"][0]["id"] == "gmstrength" and overlaps(w))]
+             and not (w.get("_strength") and overlaps(w))]
+    for w in fresh:
+        w.pop("_strength", None)
+    # Vektforslagene i appen følger det tyngste settet sist øvelsen ble gjort, som ved import.
+    exw = state.setdefault("exWeights", {})
+    for w in fresh:
+        for e in w["entries"]:
+            mx = max([x.get("w") or 0 for x in e.get("sets") or []] + [e.get("topW") or 0])
+            cur = exw.get(e["id"])
+            if mx > 0 and (not isinstance(cur, dict) or w["d"] >= (cur.get("d") or "")):
+                exw[e["id"]] = {"w": mx, "d": w["d"]}
     if fresh:
         need = {e["id"] for w in fresh for e in w["entries"]} & set(CUSTOM)
         add = [dict(CUSTOM[i], _ts=int(time.time() * 1000)) for i in sorted(need) if i not in known]
@@ -570,12 +598,20 @@ def sync_once(dry_run=False, days=None):
         g.client.dump(TOKENS)  # fornyede nøkler tas vare på
     except Exception:
         pass
+    code, prof = og("GET", "/api/data")
+    og_state = prof.get("state") if code == 200 and isinstance(prof.get("state"), dict) else {}
+    routines = og_state.get("routines") or []
+    if PUSH and og_state:
+        try:
+            garmin_workouts.sync_routines(g, og_state, st, log, dry_run=dry_run)
+        except Exception as e:
+            log("FEIL ved sending av økter til Garmin:", e)
     workouts, skipped = [], {}
     for a in acts:
         sets_data = None
         if (a.get("activityType") or {}).get("typeKey") == "strength_training":
             sets_data = _try(g.get_activity_exercise_sets, a.get("activityId"))
-        w = to_workout(a, sets_data)
+        w = to_workout(a, sets_data, routines)
         if w:
             workouts.append(w)
         else:
