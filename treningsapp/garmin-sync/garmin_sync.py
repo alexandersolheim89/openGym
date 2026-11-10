@@ -5,6 +5,7 @@ Kommandoer:
   login     Logg inn på Garmin én gang (e-post, passord, ev. engangskode). Lagrer bare
             innloggingsnøkler i GARMIN_TOKENS, aldri passordet.
   once      Én synk nå. Med --dry-run vises hva som ville blitt lagt inn, uten å lagre.
+            Med --days N hentes de siste N dagene (f.eks. etter at nye aktivitetstyper er lagt til).
   run       Synk med jevne mellomrom (standard for containeren).
 
 Øktene skrives i samme form som openGyms egen CSV-import lager (lib/import-csv.js): en økt per
@@ -48,8 +49,22 @@ TYPES = {
     "gravel_cycling": ("5214", "Sykkel"),
     "indoor_cycling": ("2138", "Innesykkel"),
     "virtual_ride": ("2138", "Innesykkel"),
+    "e_bike_fitness": ("5214", "El-sykkel"),
+    "e_bike_mountain": ("5214", "El-terrengsykkel"),
     "indoor_rowing": ("1161", "Romaskin"),
     "elliptical": ("2141", "Crosstrainer"),
+    "indoor_climbing": ("gmclimb", "Inneklatring"),
+    "bouldering": ("gmclimb", "Buldring"),
+    "rock_climbing": ("gmclimb", "Klatring"),
+}
+
+# Merkes i notatet, så el-sykkel skiller seg fra vanlig sykkel i historikken.
+TAGS = {"e_bike_fitness": "el-sykkel", "e_bike_mountain": "el-sykkel"}
+
+# Øvelser som ikke finnes i openGyms katalog. Lages som egne øvelser første gang de trengs.
+CUSTOM = {
+    "gmclimb": {"id": "gmclimb", "n": "Klatring", "bp": "cardio", "eq": "body weight",
+                "desc": "Lagt til av garmin-sync for klatreøkter fra Garmin.", "custom": True},
 }
 
 
@@ -119,7 +134,7 @@ def to_workout(a):
     if avg and mx:
         s["hr"] = {"avg": round(avg), "max": round(mx)}
 
-    bits = ["Fra Garmin"]
+    bits = ["Fra Garmin"] + ([TAGS[type_key]] if type_key in TAGS else [])
     if km > 0:
         bits.append(f"{_comma(km, 2)} km")
     bits.append(_fmt_dur(dur))
@@ -167,8 +182,17 @@ def merge_into(state, workouts):
     """Legger nye økter inn i profilen. Hopper over de som finnes eller er slettet i appen."""
     have = {w.get("id") for w in state.get("workouts") or []}
     gone = set(((state.get("deleted") or {}).get("workouts") or {}).keys())
-    fresh = [w for w in workouts if w["id"] not in have and w["id"] not in gone]
+    known = {c.get("id") for c in state.get("customEx") or []}
+    gone_ex = set(((state.get("deleted") or {}).get("customEx") or {}).keys())
+    # En egen øvelse du har slettet i appen lages ikke igjen, og øktene som ville brukt den hoppes over.
+    blocked = {i for i in CUSTOM if i in gone_ex and i not in known}
+    fresh = [w for w in workouts if w["id"] not in have and w["id"] not in gone
+             and not any(e["id"] in blocked for e in w["entries"])]
     if fresh:
+        need = {e["id"] for w in fresh for e in w["entries"]} & set(CUSTOM)
+        add = [dict(CUSTOM[i], _ts=int(time.time() * 1000)) for i in sorted(need) if i not in known]
+        if add:
+            state["customEx"] = (state.get("customEx") or []) + add
         state["workouts"] = sorted((state.get("workouts") or []) + fresh,
                                    key=lambda w: (w.get("d") or "", w.get("start") or 0))
         state["_ts"] = max(int(time.time() * 1000), int(state.get("_ts") or 0) + 1)
@@ -216,11 +240,11 @@ def save_state(s):
     os.replace(tmp, STATE_FILE)
 
 
-def sync_once(dry_run=False):
+def sync_once(dry_run=False, days=None):
     if not OPENGYM_TOKEN:
         raise RuntimeError("GARMIN_SYNC_OPENGYM_TOKEN mangler i .env")
     st = load_state()
-    days = LOOKBACK_DAYS if st.get("last_ok") else FIRST_DAYS
+    days = days or (LOOKBACK_DAYS if st.get("last_ok") else FIRST_DAYS)
     end = datetime.now().date()
     start = end - timedelta(days=days)
     g = garmin_client()
@@ -262,7 +286,10 @@ if __name__ == "__main__":
     if cmd == "login":
         cmd_login()
     elif cmd == "once":
-        sync_once(dry_run="--dry-run" in sys.argv)
+        days = None
+        if "--days" in sys.argv:
+            days = int(sys.argv[sys.argv.index("--days") + 1])
+        sync_once(dry_run="--dry-run" in sys.argv, days=days)
     elif cmd == "run":
         cmd_run()
     else:
