@@ -6,6 +6,7 @@ Kommandoer:
             innloggingsnøkler i GARMIN_TOKENS, aldri passordet.
   once      Én synk nå. Med --dry-run vises hva som ville blitt lagt inn, uten å lagre.
             Med --days N hentes de siste N dagene (f.eks. etter at nye aktivitetstyper er lagt til).
+  styrke    Viser hva Garmin har lagret om styrkeøktene de siste 30 dagene. Lagrer ingenting.
   run       Synk med jevne mellomrom (standard for containeren).
 
 Øktene skrives i samme form som openGyms egen CSV-import lager (lib/import-csv.js): en økt per
@@ -271,6 +272,39 @@ def sync_once(dry_run=False, days=None):
         save_state(st)
 
 
+def cmd_strength(days=30):
+    """Viser hva Garmin har lagret om styrkeøktene (øvelser, reps, vekt). Lagrer ingenting."""
+    g = garmin_client()
+    end = datetime.now().date()
+    acts = g.get_activities_by_date((end - timedelta(days=days)).isoformat(), end.isoformat()) or []
+    strength = [a for a in acts if (a.get("activityType") or {}).get("typeKey") == "strength_training"]
+    log(f"{len(strength)} styrkeøkter siste {days} dager")
+    for a in strength:
+        dur = _num(a.get("duration")) or 0
+        print(f"\n== {a.get('startTimeLocal', '')[:16]}  {a.get('activityName') or ''}  "
+              f"{_fmt_dur(dur)}  snittpuls {round(_num(a.get('averageHR')) or 0)}  "
+              f"{round(_num(a.get('calories')) or 0)} kcal  aktive sett: {a.get('activeSets', '?')}", flush=True)
+        try:
+            data = g.get_activity_exercise_sets(a.get("activityId")) or {}
+        except Exception as e:
+            print("   (fikk ikke hentet settene:", e, ")")
+            continue
+        n = 0
+        for st in data.get("exerciseSets") or []:
+            if st.get("setType") != "ACTIVE":
+                continue
+            n += 1
+            ex = (st.get("exercises") or [{}])
+            best = max(ex, key=lambda x: x.get("probability") or 0) if ex else {}
+            kg = (_num(st.get("weight")) or 0) / 1000
+            print(f"   sett {n:2d}: {best.get('category') or '?'} / {best.get('name') or '-'}"
+                  f"  reps {st.get('repetitionCount') if st.get('repetitionCount') is not None else '?'}"
+                  f"  {_comma(kg, 1) + ' kg' if kg > 0 else 'ingen vekt'}"
+                  f"  {_fmt_dur(_num(st.get('duration')) or 0)}")
+        if not n:
+            print("   (ingen sett lagret, bare tid og puls)")
+
+
 def cmd_run():
     log(f"garmin-sync startet: hvert {INTERVAL_MIN}. minutt mot {OPENGYM_URL}")
     while True:
@@ -290,6 +324,8 @@ if __name__ == "__main__":
         if "--days" in sys.argv:
             days = int(sys.argv[sys.argv.index("--days") + 1])
         sync_once(dry_run="--dry-run" in sys.argv, days=days)
+    elif cmd == "styrke":
+        cmd_strength(int(sys.argv[2]) if len(sys.argv) > 2 else 30)
     elif cmd == "run":
         cmd_run()
     else:
