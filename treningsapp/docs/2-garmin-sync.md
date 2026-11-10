@@ -10,7 +10,9 @@ Garmin Connect og legger dem inn i openGym som økter, med tid, distanse, fart o
 | Gåtur, fottur | Walking |
 | Sykkel, terrengsykkel | Riding outdoor bicycle |
 | Innesykkel | Stationary bike |
+| El-sykkel | Riding outdoor bicycle, merket «el-sykkel» i notatet |
 | Romaskin, crosstrainer | Rowing, elliptical |
+| Inneklatring, buldring, klatring | «Klatring» (egen øvelse, lages første gang) |
 | **Styrke** | **Hoppes over.** Den logger du i openGym, ellers blir den dobbel. |
 
 Hver økt får et notat som `Fra Garmin · 5,21 km · 28:14 · 5:25 /km · snittpuls 148 · 312 kcal`.
@@ -80,6 +82,15 @@ docker compose up -d garmin-sync && docker compose logs -f garmin-sync
 
 Etter noen sekunder skal du se `Lagt inn …`-linjer for øktene. **Ctrl+C** for å slutte å følge med.
 Tjenesten går videre i bakgrunnen og starter av seg selv når serveren starter.
+
+## Hente eldre aktiviteter på nytt
+
+Etter at nye aktivitetstyper er lagt til, henter vanlig synk bare de siste 3 dagene. For å ta
+med eldre (allerede innlagte økter dobles ikke):
+
+```bash
+docker compose run --rm garmin-sync once --days 30
+```
 
 ## Når noe stopper
 
