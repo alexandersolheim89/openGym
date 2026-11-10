@@ -5,7 +5,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends nodejs && rm -rf /var/lib/apt/lists/*
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY garmin_sync.py og_fit.mjs ./
+COPY garmin_sync.py garmin_workouts.py og_fit.mjs ./
 RUN mkdir -p /tokens && chmod 700 /tokens
 ENTRYPOINT ["python", "garmin_sync.py"]
 CMD ["run"]
