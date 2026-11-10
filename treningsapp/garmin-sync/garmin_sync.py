@@ -162,6 +162,109 @@ def to_workout(a):
     }
 
 
+# ---------------------------------------------------------------- dagsform
+
+# Garmin-tall som legges inn som egne felt under Kroppsmål i openGym (én innsjekk per dag).
+HEALTH_FIELDS = [
+    ("gm_rhr", "Hvilepuls"),
+    ("gm_hrv", "HRV natt (ms)"),
+    ("gm_sleep", "Søvn (timer)"),
+    ("gm_sleepscore", "Søvnscore"),
+    ("gm_bb", "Body Battery morgen"),
+    ("gm_steps", "Skritt"),
+    ("gm_vo2", "VO2max"),
+]
+HEALTH_DAYS = int(os.environ.get("HEALTH_DAYS", "2"))
+# openGyms innebygde kroppsmål. En ny dag får dem tomme, slik appen selv lager en innsjekk.
+MEASUREMENT_KEYS = ["neck", "shoulders", "chest", "waist", "hips", "abdomen", "upperArmLeft",
+                    "upperArmRight", "forearmLeft", "forearmRight", "wristLeft", "wristRight",
+                    "thighLeft", "thighRight", "calfLeft", "calfRight", "ankleLeft", "ankleRight", "bodyFat"]
+
+
+def _try(fn, *a):
+    try:
+        return fn(*a)
+    except Exception:
+        return None
+
+
+def _first(*vals):
+    for v in vals:
+        n = _num(v)
+        if n is not None and n > 0:
+            return n
+    return None
+
+
+def health_for_day(g, day):
+    """Dagsformen for én dag fra Garmin, som {felt-id: verdi}. Mangler et tall, er det utelatt."""
+    out = {}
+    st = _try(g.get_stats, day) or {}
+    out["gm_rhr"] = _first(st.get("restingHeartRate"))
+    out["gm_steps"] = _first(st.get("totalSteps"))
+    out["gm_bb"] = _first(st.get("bodyBatteryAtWakeTime"), st.get("bodyBatteryHighestValue"))
+    hrv = _try(g.get_hrv_data, day) or {}
+    out["gm_hrv"] = _first((hrv.get("hrvSummary") or {}).get("lastNightAvg"))
+    sl = (_try(g.get_sleep_data, day) or {}).get("dailySleepDTO") or {}
+    secs = _first(sl.get("sleepTimeSeconds"))
+    out["gm_sleep"] = round(secs / 3600, 1) if secs else None
+    out["gm_sleepscore"] = _first(((sl.get("sleepScores") or {}).get("overall") or {}).get("value"))
+    mm = _try(g.get_max_metrics, day)
+    rows = mm if isinstance(mm, list) else [mm] if isinstance(mm, dict) else []
+    for r in rows:
+        gen = (r or {}).get("generic") or {}
+        v = _first(gen.get("vo2MaxPreciseValue"), gen.get("vo2MaxValue"))
+        if v:
+            out["gm_vo2"] = round(v, 1)
+    return {k: (round(v) if k in ("gm_rhr", "gm_steps", "gm_bb", "gm_sleepscore", "gm_hrv") else v)
+            for k, v in out.items() if v is not None}
+
+
+def merge_health(state, days, created):
+    """Legger dagsformen inn under Kroppsmål. Endrer bare Garmin-feltene, aldri dine egne mål.
+    Et felt du har slettet i appen lages ikke igjen (`created` husker hvilke vi har laget)."""
+    custom = state.get("customMeasurements") or []
+    have = {c.get("id") for c in custom}
+    fields = []
+    for fid, name in HEALTH_FIELDS:
+        if fid in have:
+            fields.append(fid)
+        elif fid not in created:
+            custom.append({"id": fid, "name": name, "enabled": True, "unit": "none"})
+            created.append(fid)
+            fields.append(fid)
+    state["customMeasurements"] = custom
+    names = dict(HEALTH_FIELDS)
+    gone = set(((state.get("deleted") or {}).get("measurements") or {}).keys())
+    entries = state.get("measurements") or []
+    by_day = {e.get("d"): e for e in entries if isinstance(e, dict)}
+    now = int(time.time() * 1000)
+    changed = []
+    for day, vals in days.items():
+        vals = {k: v for k, v in vals.items() if k in fields}
+        if not vals or day in gone:
+            continue
+        e = by_day.get(day)
+        if e is None:
+            e = {"d": day, "t": now, **{k: None for k in MEASUREMENT_KEYS}, "other": []}
+            entries.append(e)
+            by_day[day] = e
+        other = {o.get("id"): o for o in e.get("other") or [] if isinstance(o, dict)}
+        diff = False
+        for k, v in vals.items():
+            if (other.get(k) or {}).get("value") != v:
+                other[k] = {"id": k, "name": names[k], "value": v, "unit": "none"}
+                diff = True
+        if diff:
+            e["other"] = list(other.values())
+            e["t"] = now
+            changed.append(day)
+    if changed:
+        state["measurements"] = sorted(entries, key=lambda e: (e.get("d") or "", e.get("t") or 0))
+        state["_ts"] = max(now, int(state.get("_ts") or 0) + 1)
+    return changed
+
+
 # ---------------------------------------------------------------- openGym
 
 def og(method, path, body=None):
@@ -200,7 +303,8 @@ def merge_into(state, workouts):
     return fresh
 
 
-def push(workouts, dry_run=False):
+def push(workouts, health=None, created=None, dry_run=False):
+    """Henter profilen, legger inn nye økter og dagsform, og lagrer. Prøver igjen ved konflikt."""
     st, got = og("GET", "/api/data")
     if st != 200:
         raise RuntimeError(f"openGym svarte {st} på GET /api/data: {got.get('error', '')}")
@@ -208,15 +312,17 @@ def push(workouts, dry_run=False):
         state = got.get("state")
         if not isinstance(state, dict):
             raise RuntimeError("profilen har ingen data på serveren ennå: åpne openGym og logg inn én gang")
+        made = list(created or [])
         fresh = merge_into(state, workouts)
-        if not fresh or dry_run:
-            return fresh
+        days = merge_health(state, health or {}, made) if health else []
+        if dry_run or not (fresh or days):
+            return fresh, days, made
         body = {"state": state, "baseRev": got.get("rev") or 0}
         if isinstance(state.get("_wid"), str):
             body["baseWid"] = state["_wid"]
         st, res = og("PUT", "/api/data", body)
         if st == 200:
-            return fresh
+            return fresh, days, made
         if st == 409 and isinstance(res.get("state"), dict):
             got = {"state": res["state"], "rev": res.get("rev")}
             continue
@@ -262,7 +368,21 @@ def sync_once(dry_run=False, days=None):
         else:
             k = (a.get("activityType") or {}).get("typeKey") or "ukjent"
             skipped[k] = skipped.get(k, 0) + 1
-    fresh = push(workouts, dry_run=dry_run)
+    hdays = days if days else (HEALTH_DAYS if st.get("last_ok") else FIRST_DAYS)
+    health = {}
+    for i in range(hdays):
+        d = (end - timedelta(days=i)).isoformat()
+        vals = health_for_day(g, d)
+        if vals:
+            health[d] = vals
+    fresh, hchanged, made = push(workouts, health, st.get("health_fields_created") or [], dry_run=dry_run)
+    if dry_run and health:
+        last = max(health)
+        log(f"Dagsform {last}: " + ", ".join(f"{dict(HEALTH_FIELDS)[k]} {v}" for k, v in health[last].items()))
+    if hchanged:
+        log(("VILLE OPPDATERT" if dry_run else "Dagsform oppdatert for") + f" {len(hchanged)} dager")
+    if not dry_run:
+        st["health_fields_created"] = made
     for w in fresh:
         log(("VILLE LAGT INN " if dry_run else "Lagt inn ") + f"{w['d']} {w['name']}: {w['note']}")
     log(f"{len(acts)} aktiviteter siste {days} dager, {len(fresh)} nye"
