@@ -265,6 +265,55 @@ def merge_health(state, days, created):
     return changed
 
 
+def weights_from_garmin(g, start, end):
+    """Innveiinger fra Garmin (lagt inn på klokka, i appen eller fra vekt): [(dag, kl, kg, id)]."""
+    data = _try(g.get_body_composition, start, end) or {}
+    out = []
+    for r in data.get("dateWeightList") or []:
+        grams, day = _num(r.get("weight")), r.get("calendarDate")
+        if not grams or not day:
+            continue
+        local = _num(r.get("date"))  # Garmin gir tidspunktet i lokal tid som ms
+        at = datetime.fromtimestamp(local / 1000, tz=timezone.utc).strftime("%H:%M") if local else None
+        out.append((day, at, round(grams / 1000, 1), f"gmw{r.get('samplePk') or day}"))
+    return out
+
+
+def merge_weights(state, readings):
+    """Legger Garmin-innveiinger i vektgrafen. En dag der du har veid deg i openGym selv, lar den være,
+    og en dag du har slettet i appen, kommer ikke tilbake."""
+    bw = state.get("bodyweight") or []
+    by_day = {e.get("d"): e for e in bw if isinstance(e, dict)}
+    gone = set(((state.get("deleted") or {}).get("bodyweight") or {}).keys())
+    lb = state.get("unit") == "lb"
+    now = int(time.time() * 1000)
+    changed = []
+    for day, at, kg, rid in readings:
+        w = round(kg * 2.2046226218, 1) if lb else kg
+        e = by_day.get(day)
+        if e is None:
+            if day in gone:
+                continue
+            r = {"id": rid, "at": at, "w": w, "t": now, "src": "garmin"}
+            e = {"d": day, "w": w, "t": now, "ins": [r], "src": "garmin"}
+            bw.append(e)
+            by_day[day] = e
+            changed.append(day)
+            continue
+        ins = e.get("ins") if isinstance(e.get("ins"), list) else None
+        mine = [x for x in ins or [] if isinstance(x, dict) and x.get("id") == rid]
+        only_garmin = ins and all(isinstance(x, dict) and x.get("src") == "garmin" for x in ins)
+        if mine and only_garmin and mine[0].get("w") != w:
+            mine[0].update({"w": w, "at": at, "t": now})
+            if len(ins) == 1:
+                e["w"], e["t"] = w, now
+            changed.append(day)
+    if changed:
+        state["bodyweight"] = sorted(bw, key=lambda e: e.get("d") or "")
+        state["_ts"] = max(now, int(state.get("_ts") or 0) + 1)
+    return changed
+
+
 # ---------------------------------------------------------------- openGym
 
 def og(method, path, body=None):
@@ -303,7 +352,7 @@ def merge_into(state, workouts):
     return fresh
 
 
-def push(workouts, health=None, created=None, dry_run=False):
+def push(workouts, health=None, created=None, dry_run=False, weights=None):
     """Henter profilen, legger inn nye økter og dagsform, og lagrer. Prøver igjen ved konflikt."""
     st, got = og("GET", "/api/data")
     if st != 200:
@@ -315,7 +364,10 @@ def push(workouts, health=None, created=None, dry_run=False):
         made = list(created or [])
         fresh = merge_into(state, workouts)
         days = merge_health(state, health or {}, made) if health else []
-        if dry_run or not (fresh or days):
+        wdays = merge_weights(state, weights) if weights else []
+        if wdays:
+            log(("VILLE LAGT INN" if dry_run else "Vekt fra Garmin:") + " " + ", ".join(wdays))
+        if dry_run or not (fresh or days or wdays):
             return fresh, days, made
         body = {"state": state, "baseRev": got.get("rev") or 0}
         if isinstance(state.get("_wid"), str):
@@ -375,7 +427,9 @@ def sync_once(dry_run=False, days=None):
         vals = health_for_day(g, d)
         if vals:
             health[d] = vals
-    fresh, hchanged, made = push(workouts, health, st.get("health_fields_created") or [], dry_run=dry_run)
+    weights = weights_from_garmin(g, (end - timedelta(days=hdays - 1)).isoformat(), end.isoformat())
+    fresh, hchanged, made = push(workouts, health, st.get("health_fields_created") or [], dry_run=dry_run,
+                                 weights=weights)
     if dry_run and health:
         last = max(health)
         log(f"Dagsform {last}: " + ", ".join(f"{dict(HEALTH_FIELDS)[k]} {v}" for k, v in health[last].items()))

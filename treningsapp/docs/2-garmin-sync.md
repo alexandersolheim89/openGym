@@ -20,6 +20,9 @@ hvilepuls, HRV natt, søvn (timer), søvnscore, Body Battery morgen, skritt og V
 Garmin-feltene endres, aldri mål du har lagt inn selv. Sletter du et av feltene i appen, lages
 det ikke igjen. Kroppsmål ligger under modulen **Body** (Settings → Modules).
 
+**Vekt** du legger inn på klokka eller i Garmin Connect havner i vektgrafen i openGym. Har du
+veid deg i openGym samme dag, vinner den, og en dag du har slettet i appen kommer ikke tilbake.
+
 Hver økt får et notat som `Fra Garmin · 5,21 km · 28:14 · 5:25 /km · snittpuls 148 · 312 kcal`.
 Samme aktivitet legges aldri inn to ganger, og en økt du sletter i appen kommer ikke tilbake.
 Første gang hentes de siste 30 dagene.
