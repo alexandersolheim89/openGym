@@ -13,9 +13,12 @@ Kommandoer:
 aktivitet med én kondisjonsøvelse fra katalogen (tid, fart, puls). Id-en er "gm<aktivitets-id>",
 så samme aktivitet aldri legges inn to ganger, og en økt du sletter i appen kommer ikke tilbake.
 """
+import base64
 import getpass
 import json
 import os
+import subprocess
+import tempfile
 import sys
 import time
 import urllib.error
@@ -439,6 +442,104 @@ def push(workouts, health=None, created=None, dry_run=False, weights=None):
     raise RuntimeError("profilen endret seg hele tiden under lagring; prøver igjen neste runde")
 
 
+# ---------------------------------------------------------------- openGym -> Garmin
+
+PUSH = os.environ.get("PUSH_TO_GARMIN", "1") == "1"
+# Uten en Garmin-aktivitet å fylle inn lastes økta opp som egen aktivitet, men først når klokka
+# har hatt tid til å synke (ellers kunne den samme økta kommet inn to ganger).
+UPLOAD_AFTER_MIN = int(os.environ.get("UPLOAD_AFTER_MIN", "180"))
+HELPER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "og_fit.mjs")
+
+
+def is_strength(w, customs):
+    cardio = {c.get("id") for c in customs if c.get("bp") == "cardio"}
+    for e in w.get("entries") or []:
+        if e.get("id") in cardio:
+            continue
+        for st in e.get("sets") or []:
+            if st.get("done") and st.get("min") is None and (st.get("r") or st.get("sides") or st.get("sec")):
+                return True
+    return False
+
+
+def to_garmin(w, state):
+    """openGym-økta som Garmin-sett og .fit, via openGyms egen eksport (og_fit.mjs)."""
+    inp = json.dumps({"workout": w, "customEx": state.get("customEx") or [], "unit": state.get("unit") or "kg"})
+    out = subprocess.run(["node", HELPER], input=inp, capture_output=True, text=True, timeout=60)
+    if out.returncode != 0:
+        raise RuntimeError("og_fit.mjs: " + (out.stderr.strip().splitlines() or ["ukjent feil"])[-1])
+    res = json.loads(out.stdout)
+    # Kondisjon (oppvarming på mølla) hører ikke hjemme blant styrkesettene i Garmin.
+    sets, skip_rest = [], False
+    for st in res["sets"]:
+        cats = [e.get("category") for e in st.get("exercises") or []]
+        if st["setType"] == "ACTIVE" and any(c in ("RUN", "CARDIO") for c in cats):
+            skip_rest = True
+            continue
+        if st["setType"] == "REST" and skip_rest:
+            skip_rest = False
+            continue
+        skip_rest = False
+        sets.append(dict(st, messageIndex=len(sets)))
+    return sets, base64.b64decode(res["fit"])
+
+
+def garmin_window(a):
+    gmt = a.get("startTimeGMT")
+    if not gmt:
+        return None
+    s = int(datetime.strptime(gmt, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc).timestamp() * 1000)
+    return s, s + int((_num(a.get("duration")) or 0) * 1000)
+
+
+def push_strength(g, acts, st, dry_run=False):
+    """Styrkeøkter logget i openGym sendes til Garmin: inn i klokkas aktivitet, eller som egen."""
+    if not PUSH:
+        return
+    now = int(time.time() * 1000)
+    since = st.setdefault("push_since", now)  # bare økter fra og med første kjøring, ikke historikken
+    pushed = st.setdefault("pushed", {})
+    code, got = og("GET", "/api/data")
+    state = got.get("state") if code == 200 else None
+    if not isinstance(state, dict):
+        log(f"FEIL: fikk ikke lest openGym ({code}) for synk til Garmin")
+        return
+    customs = state.get("customEx") or []
+    strength_acts = [(a, garmin_window(a)) for a in acts
+                     if (a.get("activityType") or {}).get("typeKey") == "strength_training" and garmin_window(a)]
+    slack = 30 * 60 * 1000
+    for w in state.get("workouts") or []:
+        wid = str(w.get("id", ""))
+        start, end = int(w.get("start") or 0), int(w.get("end") or 0)
+        if wid.startswith("gm") or wid in pushed or not end or end < since or not is_strength(w, customs):
+            continue
+        match = next((a for a, (s, e) in strength_acts if s - slack <= end and start <= e + slack), None)
+        if not match and now - end < UPLOAD_AFTER_MIN * 60 * 1000:
+            continue  # klokka kan fortsatt være på vei inn; prøv igjen senere
+        sets, fit = to_garmin(w, state)
+        name = w.get("name") or "Styrke"
+        if match:
+            aid = match.get("activityId")
+            if dry_run:
+                log(f"VILLE FYLT INN {len(sets)} sett fra «{name}» i Garmin-aktiviteten {match.get('activityName')}")
+                continue
+            g.set_activity_exercise_sets(aid, {"activityId": aid, "exerciseSets": sets})
+            _try(g.set_activity_name, str(aid), name)
+            pushed[wid] = {"garmin": aid, "at": now}
+            log(f"Til Garmin: settene fra «{name}» er fylt inn i aktiviteten fra klokka")
+        else:
+            if dry_run:
+                log(f"VILLE LASTET OPP «{name}» ({w.get('d')}) som egen styrkeaktivitet i Garmin")
+                continue
+            with tempfile.TemporaryDirectory() as d:
+                path = os.path.join(d, f"opengym-{wid}.fit")
+                with open(path, "wb") as f:
+                    f.write(fit)
+                g.upload_activity(path)
+            pushed[wid] = {"garmin": "upload", "at": now}
+            log(f"Til Garmin: «{name}» ({w.get('d')}) er lastet opp som styrkeaktivitet")
+
+
 # ---------------------------------------------------------------- synk
 
 def load_state():
@@ -501,6 +602,10 @@ def sync_once(dry_run=False, days=None):
         log(("VILLE LAGT INN " if dry_run else "Lagt inn ") + f"{w['d']} {w['name']}: {w['note']}")
     log(f"{len(acts)} aktiviteter siste {days} dager, {len(fresh)} nye"
         + (f", hoppet over: {skipped}" if skipped else ""))
+    try:
+        push_strength(g, acts, st, dry_run=dry_run)
+    except Exception as e:
+        log("FEIL ved synk til Garmin:", e)
     if not dry_run:
         st["last_ok"] = datetime.now().isoformat(timespec="seconds")
         save_state(st)

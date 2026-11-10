@@ -91,6 +91,19 @@ docker compose up -d garmin-sync && docker compose logs -f garmin-sync
 Etter noen sekunder skal du se `Lagt inn …`-linjer for øktene. **Ctrl+C** for å slutte å følge med.
 Tjenesten går videre i bakgrunnen og starter av seg selv når serveren starter.
 
+## Styrke fra openGym til Garmin
+
+Styrkeøkter du logger i openGym sendes til Garmin Connect, så Garmin har de ekte settene:
+
+- **Startet du styrkeaktiviteten på klokka:** settene fra openGym (øvelse, reps, kg) fylles inn
+  i aktiviteten og erstatter Garmins gjetning. Puls og treningsbelastning fra klokka beholdes, og
+  aktiviteten får rutinens navn.
+- **Uten klokke:** økta lastes opp som en egen styrkeaktivitet, laget av openGyms .fit-eksport.
+  Det skjer først 3 timer etter økta, så klokka rekker å synke hvis du hadde den på.
+
+Bare økter fra og med første kjøring sendes, ikke historikken. Oppvarmingen på mølla tas ikke
+med blant settene. Slås av med `PUSH_TO_GARMIN=0` i `.env`.
+
 ## Se hva Garmin har lagret om styrkeøktene
 
 ```bash
