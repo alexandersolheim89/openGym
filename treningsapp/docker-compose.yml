@@ -61,9 +61,12 @@ services:
       - OPENGYM_URL=http://api:3000
       - GARMIN_SYNC_OPENGYM_TOKEN=${GARMIN_SYNC_OPENGYM_TOKEN:-}
       - SYNC_INTERVAL_MIN=${SYNC_INTERVAL_MIN:-30}
+      - PUSH_TO_GARMIN=${PUSH_TO_GARMIN:-1}
+      - OPENGYM_LIB=/opengym-src/lib
       - TZ=${TZ:-Europe/Oslo}
     volumes:
       - ./garmin-tokens:/tokens   # Garmin-innlogging (ikke passordet). Ikke i git, ikke i backup.
+      - ../frontend/src:/opengym-src:ro   # openGyms egen .fit-eksport, for styrkeøkter til Garmin
 
 volumes:
   caddy_data:
