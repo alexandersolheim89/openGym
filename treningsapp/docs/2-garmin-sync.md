@@ -13,7 +13,7 @@ Garmin Connect og legger dem inn i openGym som økter, med tid, distanse, fart o
 | El-sykkel | Riding outdoor bicycle, merket «el-sykkel» i notatet |
 | Romaskin, crosstrainer | Rowing, elliptical |
 | Inneklatring, buldring, klatring | «Klatring» (egen øvelse, lages første gang) |
-| **Styrke** | **Hoppes over.** Den logger du i openGym, ellers blir den dobbel. |
+| **Styrke** | «Styrkeøkt (Garmin)» med tid, puls og kalorier. Settene Garmin gjettet står i notatet, så de ikke gir feil rekorder. **Hoppes over** når du har logget en økt i openGym på samme tid. |
 
 **Dagsform** legges også inn hver dag, under **Kroppsmål** i openGym (egne felt med grafer):
 hvilepuls, HRV natt, søvn (timer), søvnscore, Body Battery morgen, skritt og VO2max. Bare

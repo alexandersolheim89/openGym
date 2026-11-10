@@ -31,7 +31,8 @@ LOOKBACK_DAYS = int(os.environ.get("SYNC_LOOKBACK_DAYS", "3"))
 STATE_FILE = os.path.join(TOKENS, "sync-state.json")
 
 # Garmin-aktivitetstype -> (openGym-øvelse fra katalogen, navn hvis aktiviteten mangler navn)
-# Styrke hoppes over med vilje: den logges i openGym, og ville ellers blitt dobbel.
+# Styrke tas med som én økt med tid og puls (Garmins gjetning på øvelser er ikke til å stole på),
+# men bare når openGym ikke allerede har en økt på samme tid.
 TYPES = {
     "running": ("0685", "Løping"),
     "street_running": ("0685", "Løping"),
@@ -54,6 +55,7 @@ TYPES = {
     "e_bike_mountain": ("5214", "El-terrengsykkel"),
     "indoor_rowing": ("1161", "Romaskin"),
     "elliptical": ("2141", "Crosstrainer"),
+    "strength_training": ("gmstrength", "Styrke"),
     "indoor_climbing": ("gmclimb", "Inneklatring"),
     "bouldering": ("gmclimb", "Buldring"),
     "rock_climbing": ("gmclimb", "Klatring"),
@@ -66,6 +68,9 @@ TAGS = {"e_bike_fitness": "el-sykkel", "e_bike_mountain": "el-sykkel"}
 CUSTOM = {
     "gmclimb": {"id": "gmclimb", "n": "Klatring", "bp": "cardio", "eq": "body weight",
                 "desc": "Lagt til av garmin-sync for klatreøkter fra Garmin.", "custom": True},
+    "gmstrength": {"id": "gmstrength", "n": "Styrkeøkt (Garmin)", "bp": "cardio", "eq": "body weight",
+                   "desc": "Styrkeøkt registrert på Garmin-klokka, med tid og puls. Legg gjerne inn "
+                           "øvelsene du gjorde ved å redigere økta.", "custom": True},
 }
 
 
@@ -114,7 +119,47 @@ def _comma(x, d=1):
     return f"{x:.{d}f}".replace(".", ",")
 
 
-def to_workout(a):
+CATEGORY_NO = {
+    "BENCH_PRESS": "Benkpress", "ROW": "Roing", "CURL": "Curl", "SQUAT": "Knebøy", "LUNGE": "Utfall",
+    "PULL_UP": "Pull-ups", "PUSH_UP": "Push-ups", "DEADLIFT": "Markløft", "SHOULDER_PRESS": "Skulderpress",
+    "LATERAL_RAISE": "Sidehev", "PLANK": "Planke", "TRICEPS_EXTENSION": "Triceps", "SHRUG": "Skuldertrekk",
+    "CALF_RAISE": "Tåhev", "CRUNCH": "Situps", "HIP_RAISE": "Hoftehev", "LEG_CURL": "Lårcurl",
+    "CHEST_FLY": "Flyes", "HIP_STABILITY": "Hofte", "CARRY": "Bæring", "CORE": "Kjerne",
+}
+
+
+def strength_summary(sets_data):
+    """Garmins sett for en styrkeøkt, oppsummert per øvelse i rekkefølge: 'Benkpress 5 sett 30–45 kg'."""
+    groups = {}
+    for st in (sets_data or {}).get("exerciseSets") or []:
+        if st.get("setType") != "ACTIVE":
+            continue
+        ex = st.get("exercises") or [{}]
+        cat = (max(ex, key=lambda x: x.get("probability") or 0) or {}).get("category") or "UNKNOWN"
+        if cat == "UNKNOWN":
+            continue
+        gr = groups.setdefault(cat, {"n": 0, "kg": [], "reps": []})
+        gr["n"] += 1
+        kg = (_num(st.get("weight")) or 0) / 1000
+        if kg > 0:
+            gr["kg"].append(kg)
+        if _num(st.get("repetitionCount")):
+            gr["reps"].append(int(_num(st.get("repetitionCount"))))
+    parts = []
+    for cat, gr in groups.items():
+        name = CATEGORY_NO.get(cat, cat.replace("_", " ").capitalize())
+        t = f"{name} {gr['n']} sett"
+        if gr["reps"]:
+            lo, hi = min(gr["reps"]), max(gr["reps"])
+            t += f" × {lo}" if lo == hi else f" × {lo}–{hi}"
+        if gr["kg"]:
+            lo, hi = min(gr["kg"]), max(gr["kg"])
+            t += f" {_comma(lo, 1).replace(',0', '')} kg" if lo == hi else f" {_comma(lo, 1).replace(',0', '')}–{_comma(hi, 1).replace(',0', '')} kg"
+        parts.append(t)
+    return ("Garmin gjettet: " + " · ".join(parts)) if parts else ""
+
+
+def to_workout(a, strength_sets=None):
     """En Garmin-aktivitet -> en openGym-økt, eller None for typer vi ikke tar med."""
     type_key = (a.get("activityType") or {}).get("typeKey") or ""
     if type_key not in TYPES:
@@ -141,6 +186,10 @@ def to_workout(a):
     bits.append(_fmt_dur(dur))
     if km > 0 and ex_id in ("0685", "2197", "2258"):
         bits.append(f"{_fmt_dur(dur / km)} /km")
+    if ex_id == "gmstrength":
+        summary = strength_summary(strength_sets)
+        bits.append(summary or "øvelser ikke registrert")
+        bits.append("rediger økta for å legge inn øvelsene")
     if avg:
         bits.append(f"snittpuls {round(avg)}")
     if _num(a.get("elevationGain")):
@@ -339,8 +388,16 @@ def merge_into(state, workouts):
     gone_ex = set(((state.get("deleted") or {}).get("customEx") or {}).keys())
     # En egen øvelse du har slettet i appen lages ikke igjen, og øktene som ville brukt den hoppes over.
     blocked = {i for i in CUSTOM if i in gone_ex and i not in known}
+    # En styrkeøkt fra klokka hoppes over når du har logget en økt i openGym på samme tid
+    # (overlapp, med 30 minutter slingringsmonn), så den ikke blir dobbel.
+    own = [(int(w.get("start") or 0), int(w.get("end") or w.get("start") or 0))
+           for w in state.get("workouts") or [] if not str(w.get("id", "")).startswith("gm")]
+    slack = 30 * 60 * 1000
+    def overlaps(w):
+        return any(w["start"] - slack <= e and s <= w["end"] + slack for s, e in own)
     fresh = [w for w in workouts if w["id"] not in have and w["id"] not in gone
-             and not any(e["id"] in blocked for e in w["entries"])]
+             and not any(e["id"] in blocked for e in w["entries"])
+             and not (w["entries"][0]["id"] == "gmstrength" and overlaps(w))]
     if fresh:
         need = {e["id"] for w in fresh for e in w["entries"]} & set(CUSTOM)
         add = [dict(CUSTOM[i], _ts=int(time.time() * 1000)) for i in sorted(need) if i not in known]
@@ -414,7 +471,10 @@ def sync_once(dry_run=False, days=None):
         pass
     workouts, skipped = [], {}
     for a in acts:
-        w = to_workout(a)
+        sets_data = None
+        if (a.get("activityType") or {}).get("typeKey") == "strength_training":
+            sets_data = _try(g.get_activity_exercise_sets, a.get("activityId"))
+        w = to_workout(a, sets_data)
         if w:
             workouts.append(w)
         else:
