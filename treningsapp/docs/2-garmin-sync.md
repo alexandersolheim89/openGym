@@ -15,6 +15,14 @@ Garmin Connect og legger dem inn i openGym som økter, med tid, distanse, fart o
 | Inneklatring, buldring, klatring | «Klatring» (egen øvelse, lages første gang) |
 | **Styrke** | **Hoppes over.** Den logger du i openGym, ellers blir den dobbel. |
 
+**Dagsform** legges også inn hver dag, under **Kroppsmål** i openGym (egne felt med grafer):
+hvilepuls, HRV natt, søvn (timer), søvnscore, Body Battery morgen, skritt og VO2max. Bare
+Garmin-feltene endres, aldri mål du har lagt inn selv. Sletter du et av feltene i appen, lages
+det ikke igjen. Kroppsmål ligger under modulen **Body** (Settings → Modules).
+
+**Vekt** du legger inn på klokka eller i Garmin Connect havner i vektgrafen i openGym. Har du
+veid deg i openGym samme dag, vinner den, og en dag du har slettet i appen kommer ikke tilbake.
+
 Hver økt får et notat som `Fra Garmin · 5,21 km · 28:14 · 5:25 /km · snittpuls 148 · 312 kcal`.
 Samme aktivitet legges aldri inn to ganger, og en økt du sletter i appen kommer ikke tilbake.
 Første gang hentes de siste 30 dagene.
@@ -83,10 +91,18 @@ docker compose up -d garmin-sync && docker compose logs -f garmin-sync
 Etter noen sekunder skal du se `Lagt inn …`-linjer for øktene. **Ctrl+C** for å slutte å følge med.
 Tjenesten går videre i bakgrunnen og starter av seg selv når serveren starter.
 
+## Se hva Garmin har lagret om styrkeøktene
+
+```bash
+docker compose run --rm garmin-sync styrke
+```
+
+Viser øvelser, reps og vekt per sett for styrkeøktene siste 30 dager. Lagrer ingenting.
+
 ## Hente eldre aktiviteter på nytt
 
 Etter at nye aktivitetstyper er lagt til, henter vanlig synk bare de siste 3 dagene. For å ta
-med eldre (allerede innlagte økter dobles ikke):
+med eldre aktiviteter og dagsform (allerede innlagte økter dobles ikke):
 
 ```bash
 docker compose run --rm garmin-sync once --days 30
