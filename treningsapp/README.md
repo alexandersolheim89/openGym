@@ -35,8 +35,8 @@ Alt vi lager selv ligger i `garmin-sync`.
 ## Status
 
 - [ ] **Steg 1: server og openGym.** Se [docs/1-server-oracle.md](docs/1-server-oracle.md).
-- [ ] **Steg 2: Garmin → openGym.** `garmin-sync` henter aktiviteter (med sett og puls) for oss
-      begge og skriver dem inn i openGym.
+- [ ] **Steg 2: Garmin → openGym.** `garmin-sync` henter løp, gåturer, sykkel og annen kondisjon
+      med tid, distanse og puls inn i openGym. Se [docs/2-garmin-sync.md](docs/2-garmin-sync.md).
 - [ ] **Steg 3: openGym → Garmin.** Rutiner fra openGym lastes opp som styrkeøkter i Garmin Connect
       og legges i kalenderen, så de ligger klare på klokka. Krever en tabell som kobler
       openGym-øvelser til Garmin-øvelser.
